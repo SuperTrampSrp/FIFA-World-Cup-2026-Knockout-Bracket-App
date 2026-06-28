@@ -1,10 +1,10 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-// ─── FLAG EMOJI ───────────────────────────────────────────────────────────────
-const FLAGS = {
+// ─── FLAGS ────────────────────────────────────────────────────────────────────
+const FLAGS: Record<string, string> = {
   USA: "🇺🇸",
   Mexico: "🇲🇽",
   Canada: "🇨🇦",
@@ -39,51 +39,52 @@ const FLAGS = {
   Denmark: "🇩🇰",
 };
 
-// ─── CARD DIMENSIONS ─────────────────────────────────────────────────────────
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const CARD_W = 160;
-const CARD_H = 72; // total card height (2 teams × 36px)
+const CARD_H = 72;
 const TEAM_H = 36;
-const COL_GAP = 48; // horizontal gap between columns
+const COL_GAP = 48;
+const VERT_GAP = 16;
 
-// ─── BRACKET TREE LAYOUT ─────────────────────────────────────────────────────
-// For N rounds, compute the vertical center of each match
-// R32: 16 matches
-// R16: 8 matches — each centered between its 2 R32 feeders
-// QF:  4 matches — centered between R16 feeders
-// SF:  2 matches
-// F:   1 match
+// ─── TYPES ────────────────────────────────────────────────────────────────────
+type Slot = "home" | "away" | null;
 
-const VERT_GAP = 16; // gap between two cards in the same pair
+type Match = {
+  id: string;
+  team1: string | null;
+  team2: string | null;
+  winner: string | null;
+  nextMatchId: string | null;
+  slot: Slot;
+};
 
-function computePositions(numMatches, prevPositions) {
-  if (!prevPositions) {
-    // R32: just stack them with gap between pairs
-    const pos = [];
-    for (let i = 0; i < numMatches; i++) {
-      const pairIdx = Math.floor(i / 2);
-      const posInPair = i % 2;
-      // 8px between pairs (extra breathing room)
-      const y =
-        pairIdx * (CARD_H * 2 + VERT_GAP + 24) +
-        posInPair * (CARD_H + VERT_GAP);
-      pos.push(y);
-    }
-    return pos;
-  }
-  // Each match in this round is centered between two consecutive prev matches
-  const pos = [];
-  for (let i = 0; i < numMatches; i++) {
-    const topCenter = prevPositions[i * 2] + CARD_H / 2;
-    const botCenter = prevPositions[i * 2 + 1] + CARD_H / 2;
-    const center = (topCenter + botCenter) / 2;
-    pos.push(center - CARD_H / 2);
-  }
-  return pos;
-}
+type Rounds = {
+  r32: Match[];
+  r16: Match[];
+  qf: Match[];
+  sf: Match[];
+  final: Match[];
+};
+
+type HistoryEntry = { rounds: Rounds; champion: string | null };
+
+type StoreState = {
+  rounds: Rounds;
+  champion: string | null;
+  history: HistoryEntry[];
+  _allMatches: () => Match[];
+  _findMatch: (id: string) => Match | undefined;
+  _roundKey: (id: string) => keyof Rounds;
+  _updateMatch: (id: string, patch: Partial<Match>) => void;
+  _clearDownstream: (matchId: string, slot: Slot) => void;
+  selectWinner: (matchId: string, clicked: string) => void;
+  undoLast: () => void;
+  resetBracket: () => void;
+};
 
 // ─── INITIAL DATA ─────────────────────────────────────────────────────────────
-function makeR32() {
-  const data = [
+function makeR32(): Match[] {
+  const data: [string, string][] = [
     ["USA", "Morocco"],
     ["Netherlands", "Uruguay"],
     ["Argentina", "Japan"],
@@ -101,28 +102,37 @@ function makeR32() {
     ["Italy", "Denmark"],
     ["Saudi Arabia", "Poland"],
   ];
-  return data.map((teams, i) => ({
-    id: `r32-${i + 1}`,
-    team1: teams[0],
-    team2: teams[1],
-    winner: null,
-    nextMatchId: `r16-${Math.floor(i / 2) + 1}`,
-    slot: i % 2 === 0 ? "home" : "away",
-  }));
+  return data.map(
+    (teams, i): Match => ({
+      id: `r32-${i + 1}`,
+      team1: teams[0],
+      team2: teams[1],
+      winner: null,
+      nextMatchId: `r16-${Math.floor(i / 2) + 1}`,
+      slot: i % 2 === 0 ? "home" : "away",
+    }),
+  );
 }
 
-function makeEmpty(prefix, count, nextPrefix) {
-  return Array.from({ length: count }, (_, i) => ({
-    id: `${prefix}-${i + 1}`,
-    team1: null,
-    team2: null,
-    winner: null,
-    nextMatchId: nextPrefix ? `${nextPrefix}-${Math.floor(i / 2) + 1}` : null,
-    slot: i % 2 === 0 ? "home" : "away",
-  }));
+function makeEmpty(
+  prefix: string,
+  count: number,
+  nextPrefix: string | null,
+): Match[] {
+  return Array.from(
+    { length: count },
+    (_, i): Match => ({
+      id: `${prefix}-${i + 1}`,
+      team1: null,
+      team2: null,
+      winner: null,
+      nextMatchId: nextPrefix ? `${nextPrefix}-${Math.floor(i / 2) + 1}` : null,
+      slot: i % 2 === 0 ? "home" : "away",
+    }),
+  );
 }
 
-const INIT = {
+const INIT: Rounds = {
   r32: makeR32(),
   r16: makeEmpty("r16", 8, "qf"),
   qf: makeEmpty("qf", 4, "sf"),
@@ -139,9 +149,35 @@ const INIT = {
   ],
 };
 
-// ─── ZUSTAND ──────────────────────────────────────────────────────────────────
-const useStore = create(
-  persist(
+// ─── LAYOUT ───────────────────────────────────────────────────────────────────
+function computePositions(
+  numMatches: number,
+  prevPositions: number[] | null,
+): number[] {
+  if (!prevPositions) {
+    const pos: number[] = [];
+    for (let i = 0; i < numMatches; i++) {
+      const pairIdx = Math.floor(i / 2);
+      const posInPair = i % 2;
+      pos.push(
+        pairIdx * (CARD_H * 2 + VERT_GAP + 24) +
+          posInPair * (CARD_H + VERT_GAP),
+      );
+    }
+    return pos;
+  }
+  const pos: number[] = [];
+  for (let i = 0; i < numMatches; i++) {
+    const topCenter = prevPositions[i * 2] + CARD_H / 2;
+    const botCenter = prevPositions[i * 2 + 1] + CARD_H / 2;
+    pos.push((topCenter + botCenter) / 2 - CARD_H / 2);
+  }
+  return pos;
+}
+
+// ─── STORE ────────────────────────────────────────────────────────────────────
+const useStore = create<StoreState>()(
+  persist<StoreState>(
     (set, get) => ({
       rounds: INIT,
       champion: null,
@@ -151,22 +187,21 @@ const useStore = create(
         const r = get().rounds;
         return [...r.r32, ...r.r16, ...r.qf, ...r.sf, ...r.final];
       },
-      _findMatch: (id) =>
+
+      _findMatch: (id: string) =>
         get()
           ._allMatches()
           .find((m) => m.id === id),
-      _roundKey: (id) =>
-        id.startsWith("r32")
-          ? "r32"
-          : id.startsWith("r16")
-            ? "r16"
-            : id.startsWith("qf")
-              ? "qf"
-              : id.startsWith("sf")
-                ? "sf"
-                : "final",
 
-      _updateMatch: (id, patch) => {
+      _roundKey: (id: string): keyof Rounds => {
+        if (id.startsWith("r32")) return "r32";
+        if (id.startsWith("r16")) return "r16";
+        if (id.startsWith("qf")) return "qf";
+        if (id.startsWith("sf")) return "sf";
+        return "final";
+      },
+
+      _updateMatch: (id: string, patch: Partial<Match>) => {
         const key = get()._roundKey(id);
         set((s) => ({
           rounds: {
@@ -178,49 +213,41 @@ const useStore = create(
         }));
       },
 
-      selectWinner: (matchId, clicked) => {
+      selectWinner: (matchId: string, clicked: string) => {
         const s = get();
         const match = s._findMatch(matchId);
         if (!match || !match.team1 || !match.team2) return;
 
         const prev = match.winner;
-        const next = prev === clicked ? null : clicked; // toggle off if same, swap if different
+        const next: string | null = prev === clicked ? null : clicked;
 
-        // snapshot for undo
         set((st) => ({
           history: [
             ...st.history,
             {
-              rounds: JSON.parse(JSON.stringify(st.rounds)),
+              rounds: JSON.parse(JSON.stringify(st.rounds)) as Rounds,
               champion: st.champion,
             },
           ],
         }));
 
-        // update this match
         get()._updateMatch(matchId, { winner: next });
 
-        // propagate to next round
         if (match.nextMatchId) {
-          const patch =
+          const patch: Partial<Match> =
             match.slot === "home" ? { team1: next } : { team2: next };
           get()._updateMatch(match.nextMatchId, patch);
-          // if the next match already has its own winner selected via that slot, clear it recursively
           if (prev && prev !== next) {
             get()._clearDownstream(match.nextMatchId, match.slot);
           }
         } else {
-          // final match
           set({ champion: next });
         }
       },
 
-      // Recursively clear downstream results when a winner changes upstream
-      _clearDownstream: (matchId, slot) => {
-        const s = get();
-        const match = s._findMatch(matchId);
+      _clearDownstream: (matchId: string, slot: Slot) => {
+        const match = get()._findMatch(matchId);
         if (!match) return;
-        // only clear if the affected slot was the current winner
         const affectedTeam = slot === "home" ? match.team1 : match.team2;
         if (match.winner && match.winner === affectedTeam) {
           get()._updateMatch(matchId, { winner: null });
@@ -250,15 +277,31 @@ const useStore = create(
 );
 
 // ─── CONFETTI ─────────────────────────────────────────────────────────────────
-function Confetti({ active }) {
-  const ref = useRef();
+function Confetti({ active }: { active: boolean }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+
   useEffect(() => {
     if (!active || !ref.current) return;
-    const c = ref.current,
-      ctx = c.getContext("2d");
+    const c = ref.current;
+    const ctx = c.getContext("2d");
+    if (!ctx) return;
+
     c.width = window.innerWidth;
     c.height = window.innerHeight;
-    const pieces = Array.from({ length: 200 }, () => ({
+
+    type Piece = {
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      color: string;
+      speed: number;
+      drift: number;
+      rot: number;
+      rs: number;
+    };
+
+    const pieces: Piece[] = Array.from({ length: 200 }, () => ({
       x: Math.random() * c.width,
       y: -20,
       w: Math.random() * 10 + 5,
@@ -271,7 +314,8 @@ function Confetti({ active }) {
       rot: Math.random() * 360,
       rs: (Math.random() - 0.5) * 8,
     }));
-    let raf;
+
+    let raf: number;
     const draw = () => {
       ctx.clearRect(0, 0, c.width, c.height);
       pieces.forEach((p) => {
@@ -294,6 +338,7 @@ function Confetti({ active }) {
       clearTimeout(t);
     };
   }, [active]);
+
   if (!active) return null;
   return (
     <canvas
@@ -308,97 +353,111 @@ function Confetti({ active }) {
   );
 }
 
-// ─── MATCH CARD ───────────────────────────────────────────────────────────────
-function MatchCard({ match, onSelect, width = CARD_W }) {
-  const { team1, team2, winner, id } = match;
-  const canPick = !!(team1 && team2);
+// ─── TEAM ROW ─────────────────────────────────────────────────────────────────
+type TeamRowProps = {
+  name: string | null;
+  isWinner: boolean;
+  canPick: boolean;
+  onClick: () => void;
+};
 
-  const Team = ({ name, isWinner }) => {
-    if (!name)
-      return (
-        <div
-          style={{
-            height: TEAM_H,
-            display: "flex",
-            alignItems: "center",
-            padding: "0 10px",
-            color: "#2A3A5A",
-            fontSize: 11,
-            fontStyle: "italic",
-            borderBottom: "1px solid rgba(255,255,255,0.04)",
-          }}
-        >
-          TBD
-        </div>
-      );
+function TeamRow({ name, isWinner, canPick, onClick }: TeamRowProps) {
+  if (!name) {
     return (
-      <button
-        onClick={() => canPick && onSelect(id, name)}
-        disabled={!canPick}
-        title={isWinner ? "Click to deselect" : "Click to select as winner"}
+      <div
         style={{
-          width: "100%",
           height: TEAM_H,
           display: "flex",
           alignItems: "center",
-          gap: 8,
           padding: "0 10px",
-          border: "none",
-          cursor: canPick ? "pointer" : "default",
-          background: isWinner ? "rgba(255,215,0,0.12)" : "transparent",
-          borderLeft: `3px solid ${isWinner ? "#FFD700" : "transparent"}`,
+          color: "#2A3A5A",
+          fontSize: 11,
+          fontStyle: "italic",
           borderBottom: "1px solid rgba(255,255,255,0.04)",
-          transition: "background 0.15s",
-        }}
-        onMouseEnter={(e) => {
-          if (canPick)
-            e.currentTarget.style.background = isWinner
-              ? "rgba(255,215,0,0.18)"
-              : "rgba(74,158,255,0.1)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = isWinner
-            ? "rgba(255,215,0,0.12)"
-            : "transparent";
         }}
       >
-        <span style={{ fontSize: 15 }}>{FLAGS[name] || "🏳️"}</span>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: isWinner ? 700 : 500,
-            color: isWinner ? "#FFD700" : "#C8D8F0",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            flex: 1,
-            textAlign: "left",
-            letterSpacing: "0.02em",
-          }}
-        >
-          {name}
-        </span>
-        {isWinner && <span style={{ fontSize: 9, color: "#FFD700" }}>★</span>}
-      </button>
+        TBD
+      </div>
     );
-  };
+  }
+  return (
+    <button
+      onClick={onClick}
+      disabled={!canPick}
+      title={isWinner ? "Click to deselect" : "Click to select as winner"}
+      style={{
+        width: "100%",
+        height: TEAM_H,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "0 10px",
+        border: "none",
+        cursor: canPick ? "pointer" : "default",
+        background: isWinner ? "rgba(255,215,0,0.12)" : "transparent",
+        borderLeft: `3px solid ${isWinner ? "#FFD700" : "transparent"}`,
+        borderBottom: "1px solid rgba(255,255,255,0.04)",
+        transition: "background 0.15s",
+      }}
+      onMouseEnter={(e) => {
+        if (canPick)
+          e.currentTarget.style.background = isWinner
+            ? "rgba(255,215,0,0.18)"
+            : "rgba(74,158,255,0.1)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = isWinner
+          ? "rgba(255,215,0,0.12)"
+          : "transparent";
+      }}
+    >
+      <span style={{ fontSize: 15 }}>{FLAGS[name] ?? "🏳️"}</span>
+      <span
+        style={{
+          fontSize: 11,
+          fontWeight: isWinner ? 700 : 500,
+          color: isWinner ? "#FFD700" : "#C8D8F0",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          flex: 1,
+          textAlign: "left",
+          letterSpacing: "0.02em",
+        }}
+      >
+        {name}
+      </span>
+      {isWinner && <span style={{ fontSize: 9, color: "#FFD700" }}>★</span>}
+    </button>
+  );
+}
+
+// ─── MATCH CARD ───────────────────────────────────────────────────────────────
+type MatchCardProps = {
+  match: Match;
+  onSelect: (id: string, team: string) => void;
+  width?: number;
+};
+
+function MatchCard({ match, onSelect, width = CARD_W }: MatchCardProps) {
+  const { team1, team2, winner, id } = match;
+  const canPick = !!(team1 && team2);
 
   return (
     <div
       style={{
         width,
         background: "linear-gradient(135deg,#13203A 0%,#0E1828 100%)",
-        border: `1px solid ${winner ? "rgba(255,215,0,0.25)" : team1 && team2 ? "rgba(74,158,255,0.2)" : "rgba(255,255,255,0.06)"}`,
+        border: `1px solid ${winner ? "rgba(255,215,0,0.25)" : canPick ? "rgba(74,158,255,0.2)" : "rgba(255,255,255,0.06)"}`,
         borderRadius: 8,
         overflow: "hidden",
         boxShadow: winner
           ? "0 0 16px rgba(255,215,0,0.1)"
           : "0 2px 8px rgba(0,0,0,0.35)",
-        transition: "border-color 0.3s,box-shadow 0.3s",
+        transition: "border-color 0.3s, box-shadow 0.3s",
         flexShrink: 0,
       }}
     >
-      {/* label */}
       <div
         style={{
           padding: "3px 10px",
@@ -411,29 +470,48 @@ function MatchCard({ match, onSelect, width = CARD_W }) {
           borderBottom: "1px solid rgba(255,255,255,0.04)",
         }}
       ></div>
-      <Team name={team1} isWinner={winner === team1} />
-      <Team name={team2} isWinner={winner === team2} />
+      <TeamRow
+        name={team1}
+        isWinner={winner === team1}
+        canPick={canPick}
+        onClick={() => team1 && onSelect(id, team1)}
+      />
+      <TeamRow
+        name={team2}
+        isWinner={winner === team2}
+        canPick={canPick}
+        onClick={() => team2 && onSelect(id, team2)}
+      />
     </div>
   );
 }
 
-// ─── SVG BRACKET COLUMN PAIR ──────────────────────────────────────────────────
-// Renders one round's matches + connector lines to the next round
+// ─── ROUND COLUMN ─────────────────────────────────────────────────────────────
+type RoundColumnProps = {
+  label: string;
+  matches: Match[];
+  positions: number[];
+  nextPositions: number[] | null;
+  onSelect: (id: string, team: string) => void;
+  cardWidth?: number;
+  showConnectors?: boolean;
+};
+
 function RoundColumn({
+  label,
   matches,
   positions,
   nextPositions,
   onSelect,
-  label,
   cardWidth = CARD_W,
   showConnectors = true,
-}) {
+}: RoundColumnProps) {
   const totalH =
-    positions.length > 0 ? Math.max(...positions.map((p, i) => p + CARD_H)) : 0;
+    positions.length > 0 ? Math.max(...positions.map((p) => p + CARD_H)) : 0;
+  const pairCount = Math.floor(matches.length / 2);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flexShrink: 0 }}>
-      {/* Label */}
       <div
         style={{
           fontSize: 10,
@@ -456,7 +534,6 @@ function RoundColumn({
           height: totalH,
         }}
       >
-        {/* Cards */}
         {matches.map((m, i) => (
           <div
             key={m.id}
@@ -466,7 +543,6 @@ function RoundColumn({
           </div>
         ))}
 
-        {/* Connector SVG */}
         {showConnectors && nextPositions && (
           <svg
             style={{
@@ -478,21 +554,14 @@ function RoundColumn({
             width={COL_GAP}
             height={totalH}
           >
-            {Array.from({ length: Math.floor(matches.length / 2) }, (_, pi) => {
+            {Array.from({ length: pairCount }, (_, pi) => {
               const t = positions[pi * 2] + CARD_H / 2;
               const b = positions[pi * 2 + 1] + CARD_H / 2;
               const mid = (t + b) / 2;
-              const hasAdv =
-                nextPositions && pi < Math.floor(matches.length / 4 + 1);
-              // check if next match slot has a team
-              const nextIdx = pi;
-              const advanced = nextPositions ? true : false;
               const color = "rgba(74,158,255,0.25)";
-              const x2 = COL_GAP;
               const xMid = COL_GAP / 2;
               return (
                 <g key={pi}>
-                  {/* horizontal from top card */}
                   <line
                     x1={0}
                     y1={t}
@@ -501,7 +570,6 @@ function RoundColumn({
                     stroke={color}
                     strokeWidth={1.5}
                   />
-                  {/* vertical join */}
                   <line
                     x1={xMid}
                     y1={t}
@@ -510,7 +578,6 @@ function RoundColumn({
                     stroke={color}
                     strokeWidth={1.5}
                   />
-                  {/* horizontal from bottom card */}
                   <line
                     x1={0}
                     y1={b}
@@ -519,11 +586,10 @@ function RoundColumn({
                     stroke={color}
                     strokeWidth={1.5}
                   />
-                  {/* horizontal out to next col */}
                   <line
                     x1={xMid}
                     y1={mid}
-                    x2={x2}
+                    x2={COL_GAP}
                     y2={mid}
                     stroke={color}
                     strokeWidth={1.5}
@@ -538,8 +604,8 @@ function RoundColumn({
   );
 }
 
-// ─── PROGRESS ─────────────────────────────────────────────────────────────────
-function Progress({ rounds }) {
+// ─── PROGRESS BAR ─────────────────────────────────────────────────────────────
+function Progress({ rounds }: { rounds: Rounds }) {
   const all = [
     ...rounds.r32,
     ...rounds.r16,
@@ -580,7 +646,7 @@ function Progress({ rounds }) {
 }
 
 // ─── CHAMPION CARD ────────────────────────────────────────────────────────────
-function ChampionCard({ team }) {
+function ChampionCard({ team }: { team: string }) {
   return (
     <div
       style={{
@@ -597,7 +663,7 @@ function ChampionCard({ team }) {
       }}
     >
       <span style={{ fontSize: 24 }}>🏆</span>
-      <span style={{ fontSize: 28 }}>{FLAGS[team] || "🏳️"}</span>
+      <span style={{ fontSize: 28 }}>{FLAGS[team] ?? "🏳️"}</span>
       <span
         style={{
           fontSize: 12,
@@ -626,7 +692,13 @@ function ChampionCard({ team }) {
 }
 
 // ─── RESET MODAL ──────────────────────────────────────────────────────────────
-function ResetModal({ onConfirm, onCancel }) {
+function ResetModal({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   return (
     <div
       style={{
@@ -669,7 +741,7 @@ function ResetModal({ onConfirm, onCancel }) {
             lineHeight: 1.6,
           }}
         >
-          All picks will be cleared. This can't be undone.
+          All picks will be cleared. This cannot be undone.
         </div>
         <div style={{ display: "flex", gap: 10 }}>
           <button
@@ -709,13 +781,13 @@ function ResetModal({ onConfirm, onCancel }) {
   );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
+// ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
   const { rounds, champion, selectWinner, undoLast, resetBracket, history } =
     useStore();
   const [showReset, setShowReset] = useState(false);
   const [confetti, setConfetti] = useState(false);
-  const prevChamp = useRef(null);
+  const prevChamp = useRef<string | null>(null);
 
   useEffect(() => {
     if (champion && !prevChamp.current) {
@@ -725,28 +797,28 @@ export default function App() {
     prevChamp.current = champion;
   }, [champion]);
 
-  // Compute positions for each round
   const pos32 = computePositions(16, null);
   const pos16 = computePositions(8, pos32);
   const posQF = computePositions(4, pos16);
   const posSF = computePositions(2, posQF);
   const posF = computePositions(1, posSF);
-
-  // Total SVG height = max of r32
   const totalH = Math.max(...pos32.map((p) => p + CARD_H));
 
   return (
     <>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
-        *{box-sizing:border-box;margin:0;padding:0;}
-        body{background:#070E1E;font-family:'Outfit',sans-serif;-webkit-font-smoothing:antialiased;}
-        ::-webkit-scrollbar{height:5px;width:5px;}
-        ::-webkit-scrollbar-track{background:rgba(255,255,255,0.03);}
-        ::-webkit-scrollbar-thumb{background:rgba(74,158,255,0.25);border-radius:4px;}
-        button{font-family:'Outfit',sans-serif;}
-        @keyframes glow{0%,100%{box-shadow:0 0 30px rgba(255,215,0,0.12);}50%{box-shadow:0 0 50px rgba(255,215,0,0.22);}}
-        .champ{animation:glow 2.5s ease-in-out infinite;}
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #070E1E; font-family: 'Outfit', sans-serif; -webkit-font-smoothing: antialiased; }
+        button { font-family: 'Outfit', sans-serif; }
+        ::-webkit-scrollbar { height: 5px; width: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
+        ::-webkit-scrollbar-thumb { background: rgba(74,158,255,0.25); border-radius: 4px; }
+        @keyframes glow {
+          0%, 100% { box-shadow: 0 0 30px rgba(255,215,0,0.12); }
+          50%       { box-shadow: 0 0 50px rgba(255,215,0,0.22); }
+        }
+        .champ { animation: glow 2.5s ease-in-out infinite; }
       `}</style>
 
       <Confetti active={confetti} />
@@ -783,7 +855,6 @@ export default function App() {
             gap: 12,
           }}
         >
-          {/* Logo */}
           <div
             style={{
               display: "flex",
@@ -833,7 +904,6 @@ export default function App() {
 
           <Progress rounds={rounds} />
 
-          {/* Actions */}
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
             <button
               onClick={undoLast}
@@ -893,18 +963,20 @@ export default function App() {
 
         {/* HINT */}
         <div style={{ padding: "12px 16px 0", fontSize: 12, color: "#2A3A5A" }}>
-          Scroll horizontally to see all rounds. Click a team to pick the
-          winner.
+          Scroll horizontally to see all rounds · Click a team to pick the
+          winner · Click again to deselect
         </div>
 
-        {/* BRACKET SCROLL CONTAINER */}
+        {/* BRACKET */}
         <div
-          style={{
-            overflowX: "auto",
-            overflowY: "visible",
-            padding: "20px 16px 40px",
-            WebkitOverflowScrolling: "touch",
-          }}
+          style={
+            {
+              overflowX: "auto",
+              overflowY: "visible",
+              padding: "20px 16px 40px",
+              WebkitOverflowScrolling: "touch",
+            } as React.CSSProperties
+          }
         >
           <div
             style={{
@@ -914,43 +986,38 @@ export default function App() {
               minWidth: "max-content",
             }}
           >
-            {/* R32 */}
             <RoundColumn
               label="Round of 32"
               matches={rounds.r32}
               positions={pos32}
               nextPositions={pos16}
               onSelect={selectWinner}
-              showConnectors={true}
+              showConnectors
             />
-            {/* R16 */}
             <RoundColumn
               label="Round of 16"
               matches={rounds.r16}
               positions={pos16}
               nextPositions={posQF}
               onSelect={selectWinner}
-              showConnectors={true}
+              showConnectors
             />
-            {/* QF */}
             <RoundColumn
               label="Quarter Finals"
               matches={rounds.qf}
               positions={posQF}
               nextPositions={posSF}
               onSelect={selectWinner}
-              showConnectors={true}
+              showConnectors
             />
-            {/* SF */}
             <RoundColumn
               label="Semi Finals"
               matches={rounds.sf}
               positions={posSF}
               nextPositions={posF}
               onSelect={selectWinner}
-              showConnectors={true}
+              showConnectors
             />
-            {/* FINAL */}
             <RoundColumn
               label="Final"
               matches={rounds.final}
@@ -960,7 +1027,7 @@ export default function App() {
               showConnectors={false}
             />
 
-            {/* CHAMPION */}
+            {/* CHAMPION SLOT */}
             <div
               style={{
                 display: "flex",
@@ -969,7 +1036,7 @@ export default function App() {
                 marginLeft: COL_GAP / 2,
               }}
             >
-              <div style={{ height: 20 + 12, display: "block" }} />
+              <div style={{ height: 32 }} />
               <div
                 style={{
                   height: totalH,
