@@ -121,6 +121,7 @@ function makeR32(): Match[] {
     }),
   );
 }
+
 function makeEmpty(
   prefix: string,
   count: number,
@@ -1118,23 +1119,16 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        html { overflow-x: hidden; }
-        body {
-          background: #070E1E;
-          font-family: 'Outfit', sans-serif;
-          -webkit-font-smoothing: antialiased;
-          overflow-x: hidden;
-          width: 100%;
-          max-width: 100vw;
-        }
+        body { background: #070E1E; font-family: 'Outfit', sans-serif; -webkit-font-smoothing: antialiased; }
         button { font-family: 'Outfit', sans-serif; }
-        ::-webkit-scrollbar { height: 4px; width: 4px; }
+        ::-webkit-scrollbar { height: 5px; width: 5px; }
         ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
         ::-webkit-scrollbar-thumb { background: rgba(74,158,255,0.25); border-radius: 4px; }
         @keyframes glow {
-          0%, 100% { box-shadow: 0 0 20px rgba(255,215,0,0.15); }
-          50%       { box-shadow: 0 0 35px rgba(255,215,0,0.28); }
+          0%, 100% { box-shadow: 0 0 30px rgba(255,215,0,0.12); }
+          50%       { box-shadow: 0 0 50px rgba(255,215,0,0.22); }
         }
+        .champ { animation: glow 2.5s ease-in-out infinite; }
       `}</style>
 
       <Confetti active={confetti} />
@@ -1163,134 +1157,115 @@ export default function App() {
             background: "rgba(5,10,20,0.97)",
             backdropFilter: "blur(20px)",
             borderBottom: "1px solid rgba(255,255,255,0.06)",
-            width: "100%",
+            padding: "0 16px",
+            height: 56,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
           }}
         >
-          {/* Row 1: logo + buttons */}
           <div
             style={{
-              padding: "0 12px",
-              height: 48,
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-between",
-              gap: 8,
+              gap: 10,
+              flexShrink: 0,
             }}
           >
-            {/* Logo */}
             <div
               style={{
+                width: 34,
+                height: 34,
+                borderRadius: 8,
+                background: "linear-gradient(135deg,#1A3A8E,#4A9EFF)",
                 display: "flex",
                 alignItems: "center",
-                gap: 8,
-                flexShrink: 0,
-                minWidth: 0,
+                justifyContent: "center",
+                fontSize: 16,
               }}
             >
+              🏆
+            </div>
+            <div>
               <div
                 style={{
-                  width: 30,
-                  height: 30,
-                  borderRadius: 7,
-                  flexShrink: 0,
-                  background: "linear-gradient(135deg,#1A3A8E,#4A9EFF)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 14,
+                  fontSize: 13,
+                  fontWeight: 800,
+                  color: "#E8F4FF",
+                  letterSpacing: "0.02em",
+                  lineHeight: 1.2,
                 }}
               >
-                🏆
+                FIFA WC 2026™
               </div>
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    fontWeight: 800,
-                    color: "#E8F4FF",
-                    lineHeight: 1.2,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  FIFA WC 2026™
-                </div>
-                <div
-                  style={{
-                    fontSize: 8,
-                    color: "#3A5080",
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Knockout Bracket
-                </div>
+              <div
+                style={{
+                  fontSize: 9,
+                  color: "#3A5080",
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Knockout Bracket
               </div>
-            </div>
-
-            {/* Buttons */}
-            <div style={{ display: "flex", gap: 5, flexShrink: 0 }}>
-              <button
-                onClick={undoLast}
-                disabled={!history.length}
-                title="Undo last pick"
-                style={{
-                  padding: "5px 10px",
-                  borderRadius: 6,
-                  border: "1px solid rgba(255,255,255,0.1)",
-                  background: "transparent",
-                  color: "#C8D8F0",
-                  fontSize: 11,
-                  cursor: history.length ? "pointer" : "not-allowed",
-                  opacity: history.length ? 1 : 0.35,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                ↩ Undo
-              </button>
-              <button
-                onClick={exportToPDF}
-                title="Export bracket to PDF"
-                style={{
-                  padding: "5px 10px",
-                  borderRadius: 6,
-                  border: "1px solid rgba(255,215,0,0.25)",
-                  background: "rgba(255,215,0,0.08)",
-                  color: "#FFD700",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                📄 PDF
-              </button>
-              <button
-                onClick={() => setShowReset(true)}
-                style={{
-                  padding: "5px 10px",
-                  borderRadius: 6,
-                  border: "1px solid rgba(255,80,80,0.2)",
-                  background: "rgba(255,80,80,0.06)",
-                  color: "#FF6B6B",
-                  fontSize: 11,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                Reset
-              </button>
             </div>
           </div>
 
-          {/* Row 2: progress bar — full width */}
-          <div
-            style={{
-              padding: "0 12px 8px",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <Progress rounds={rounds} />
+          <Progress rounds={rounds} />
+
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <button
+              onClick={undoLast}
+              disabled={!history.length}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.1)",
+                background: "transparent",
+                color: "#C8D8F0",
+                fontSize: 11,
+                cursor: history.length ? "pointer" : "not-allowed",
+                opacity: history.length ? 1 : 0.35,
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              ↩ Undo
+            </button>
+            <button
+              onClick={exportToPDF}
+              title="Export bracket to PDF"
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid rgba(255,215,0,0.25)",
+                background: "rgba(255,215,0,0.08)",
+                color: "#FFD700",
+                fontSize: 11,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              📄 Export PDF
+            </button>
+            <button
+              onClick={() => setShowReset(true)}
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid rgba(255,80,80,0.2)",
+                background: "rgba(255,80,80,0.06)",
+                color: "#FF6B6B",
+                fontSize: 11,
+                cursor: "pointer",
+              }}
+            >
+              Reset
+            </button>
           </div>
         </div>
 
@@ -1324,13 +1299,10 @@ export default function App() {
         <div
           style={
             {
-              width: "100%",
               overflowX: "auto",
-              overflowY: "hidden",
-              padding: "20px 12px 40px",
+              overflowY: "visible",
+              padding: "20px 16px 40px",
               WebkitOverflowScrolling: "touch",
-              /* Clip the glow shadow that bleeds on the right on mobile */
-              isolation: "isolate",
             } as React.CSSProperties
           }
         >
@@ -1340,7 +1312,6 @@ export default function App() {
               alignItems: "flex-start",
               gap: 0,
               minWidth: "max-content",
-              paddingRight: 16,
             }}
           >
             <RoundColumn
@@ -1389,45 +1360,52 @@ export default function App() {
               style={{
                 display: "flex",
                 flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
                 flexShrink: 0,
                 marginLeft: COL_GAP / 2,
-                height: totalH + 32,
-                overflow: "visible",
               }}
             >
-              {champion ? (
-                <div style={{ animation: "glow 2.5s ease-in-out infinite" }}>
-                  <ChampionCard team={champion} />
-                </div>
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "20px 16px",
-                    border: "1px dashed rgba(255,215,0,0.15)",
-                    borderRadius: 12,
-                    minWidth: 120,
-                  }}
-                >
-                  <span style={{ fontSize: 24, opacity: 0.2 }}>🏆</span>
-                  <span
+              <div style={{ height: 32 }} />
+              <div
+                style={{
+                  height: totalH,
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {champion ? (
+                  <div className="champ">
+                    <ChampionCard team={champion} />
+                  </div>
+                ) : (
+                  <div
                     style={{
-                      fontSize: 9,
-                      color: "rgba(255,215,0,0.25)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.12em",
-                      fontWeight: 700,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "20px 16px",
+                      border: "1px dashed rgba(255,215,0,0.15)",
+                      borderRadius: 12,
+                      minWidth: 120,
                     }}
                   >
-                    Champion
-                  </span>
-                </div>
-              )}
+                    <span style={{ fontSize: 24, opacity: 0.2 }}>🏆</span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        color: "rgba(255,215,0,0.25)",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.12em",
+                        fontWeight: 700,
+                      }}
+                    >
+                      Champion
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
