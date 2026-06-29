@@ -805,6 +805,308 @@ export default function App() {
     prevChamp.current = champion;
   }, [champion]);
 
+  // ─── PDF EXPORT ─────────────────────────────────────────────────────────────
+  const exportToPDF = async () => {
+    type WindowWithJsPDF = Window & {
+      jspdf?: {
+        jsPDF: new (opts: {
+          orientation: string;
+          unit: string;
+          format: string;
+        }) => JsPDFDoc;
+      };
+    };
+    type JsPDFDoc = {
+      setFillColor(r: number, g: number, b: number): void;
+      setDrawColor(r: number, g: number, b: number): void;
+      setTextColor(r: number, g: number, b: number): void;
+      setLineWidth(w: number): void;
+      setFont(name: string, style: string): void;
+      setFontSize(size: number): void;
+      rect(x: number, y: number, w: number, h: number, style: string): void;
+      line(x1: number, y1: number, x2: number, y2: number): void;
+      text(str: string, x: number, y: number, opts?: { align?: string }): void;
+      save(filename: string): void;
+      internal: { pageSize: { getWidth(): number; getHeight(): number } };
+    };
+
+    await new Promise<void>((resolve) => {
+      const win = window as WindowWithJsPDF;
+      if (win.jspdf) {
+        resolve();
+        return;
+      }
+      const s = document.createElement("script");
+      s.src =
+        "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+      s.onload = () => resolve();
+      document.head.appendChild(s);
+    });
+
+    const win = window as WindowWithJsPDF;
+    if (!win.jspdf) return;
+    const doc: JsPDFDoc = new win.jspdf.jsPDF({
+      orientation: "landscape",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const PW = doc.internal.pageSize.getWidth();
+    const PH = doc.internal.pageSize.getHeight();
+
+    // Background
+    doc.setFillColor(7, 14, 30);
+    doc.rect(0, 0, PW, PH, "F");
+
+    // Title
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(255, 215, 0);
+    doc.text("FIFA WORLD CUP 2026", PW / 2, 14, { align: "center" });
+    doc.setFontSize(9);
+    doc.setTextColor(74, 158, 255);
+    doc.text("KNOCKOUT BRACKET", PW / 2, 20, { align: "center" });
+    doc.setDrawColor(74, 158, 255);
+    doc.setLineWidth(0.3);
+    doc.line(10, 23, PW - 10, 23);
+
+    // Country code abbreviations (PDF-safe, no emoji)
+    const CC: Record<string, [string, number, number, number]> = {
+      USA: ["US", 178, 34, 52],
+      Mexico: ["MX", 0, 130, 60],
+      Canada: ["CA", 255, 0, 0],
+      Argentina: ["AR", 74, 144, 226],
+      Brazil: ["BR", 0, 156, 59],
+      Uruguay: ["UY", 0, 150, 200],
+      Ecuador: ["EC", 255, 210, 0],
+      Colombia: ["CO", 252, 209, 22],
+      France: ["FR", 0, 35, 149],
+      Germany: ["DE", 60, 60, 60],
+      Spain: ["ES", 170, 21, 27],
+      England: ["EN", 12, 35, 118],
+      Portugal: ["PT", 6, 134, 50],
+      Netherlands: ["NL", 255, 106, 0],
+      Belgium: ["BE", 255, 0, 0],
+      Italy: ["IT", 0, 140, 118],
+      Morocco: ["MA", 0, 122, 61],
+      Senegal: ["SN", 0, 163, 58],
+      Nigeria: ["NG", 0, 160, 0],
+      "South Africa": ["SA", 0, 119, 73],
+      Japan: ["JP", 188, 0, 45],
+      "South Korea": ["KR", 36, 36, 36],
+      Australia: ["AU", 0, 0, 139],
+      Iran: ["IR", 239, 198, 60],
+      "Saudi Arabia": ["SA", 112, 189, 103],
+      Qatar: ["QA", 128, 0, 64],
+      Turkey: ["TR", 227, 10, 23],
+      Croatia: ["HR", 255, 0, 0],
+      Switzerland: ["CH", 255, 0, 0],
+      Serbia: ["RS", 198, 32, 36],
+      Poland: ["PL", 220, 20, 60],
+      Denmark: ["DK", 198, 12, 48],
+    };
+
+    const stageList: { label: string; matches: Match[] }[] = [
+      { label: "Round of 32", matches: rounds.r32 },
+      { label: "Round of 16", matches: rounds.r16 },
+      { label: "Quarter Finals", matches: rounds.qf },
+      { label: "Semi Finals", matches: rounds.sf },
+      { label: "Final", matches: rounds.final },
+    ];
+
+    // Fixed card width based on longest expected team name (~36mm fits "Saudi Arabia")
+    const CARD_W_PDF = 36;
+    const CARD_H_PDF = 12;
+    const COL_CONN = 8; // connector gap between columns
+    const TOTAL_COLS_W =
+      stageList.length * CARD_W_PDF + (stageList.length - 1) * COL_CONN;
+    const CHAMP_W = 32;
+    const TOTAL_W = TOTAL_COLS_W + COL_CONN + CHAMP_W;
+    const startX = (PW - TOTAL_W) / 2; // center everything
+    const startY = 28;
+    const availH = PH - startY - 10;
+
+    // Helper: draw one team row inside a card
+    const drawTeamRow = (
+      name: string,
+      isWinner: boolean,
+      rx: number,
+      ry: number,
+      rw: number,
+      rh: number,
+    ) => {
+      const cc = CC[name];
+      const dotR = 1.4;
+      const dotX = rx + 2.5;
+      const dotY = ry + rh / 2;
+
+      // Colored dot as flag substitute
+      if (cc) {
+        doc.setFillColor(cc[1], cc[2], cc[3]);
+        // Draw circle approximation with a small square dot
+        doc.rect(dotX - dotR, dotY - dotR, dotR * 2, dotR * 2, "F");
+      }
+
+      // Team name
+      doc.setFontSize(5.5);
+      doc.setFont("helvetica", isWinner ? "bold" : "normal");
+      if (isWinner) doc.setTextColor(255, 215, 0);
+      else if (name === "TBD") doc.setTextColor(60, 80, 110);
+      else doc.setTextColor(200, 215, 240);
+      doc.text(name, rx + 6, ry + rh / 2 + 1.8);
+
+      // Winner star
+      if (isWinner) {
+        doc.setTextColor(255, 215, 0);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(5);
+        doc.text("*", rx + rw - 3, ry + rh / 2 + 1.5);
+      }
+    };
+
+    stageList.forEach((stage, si) => {
+      const colX = startX + si * (CARD_W_PDF + COL_CONN);
+      const n = stage.matches.length;
+      const slotH = availH / n;
+
+      // Column label
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(5);
+      doc.setTextColor(58, 80, 128);
+      doc.text(stage.label.toUpperCase(), colX + CARD_W_PDF / 2, startY + 3, {
+        align: "center",
+      });
+
+      stage.matches.forEach((match, mi) => {
+        const cardY = startY + 6 + mi * slotH + (slotH - CARD_H_PDF) / 2;
+        const hasWinner = !!match.winner;
+
+        // Card background
+        if (hasWinner) doc.setFillColor(16, 28, 6);
+        else doc.setFillColor(12, 20, 42);
+        doc.rect(colX, cardY, CARD_W_PDF, CARD_H_PDF, "F");
+
+        // Card border
+        if (hasWinner) doc.setDrawColor(150, 110, 0);
+        else doc.setDrawColor(28, 52, 95);
+        doc.setLineWidth(0.2);
+        doc.rect(colX, cardY, CARD_W_PDF, CARD_H_PDF, "S");
+
+        // Mid divider
+        doc.setDrawColor(20, 35, 60);
+        doc.setLineWidth(0.1);
+        doc.line(
+          colX + 0.5,
+          cardY + CARD_H_PDF / 2,
+          colX + CARD_W_PDF - 0.5,
+          cardY + CARD_H_PDF / 2,
+        );
+
+        const t1 = match.team1 ?? "TBD";
+        const t2 = match.team2 ?? "TBD";
+
+        drawTeamRow(
+          t1,
+          match.winner === match.team1,
+          colX,
+          cardY,
+          CARD_W_PDF,
+          CARD_H_PDF / 2,
+        );
+        drawTeamRow(
+          t2,
+          match.winner === match.team2,
+          colX,
+          cardY + CARD_H_PDF / 2,
+          CARD_W_PDF,
+          CARD_H_PDF / 2,
+        );
+
+        // Connector lines to next round
+        if (si < stageList.length - 1) {
+          const midY = cardY + CARD_H_PDF / 2;
+          const nextN = stageList[si + 1].matches.length;
+          const nextSlotH = availH / nextN;
+          const nextMi = Math.floor(mi / 2);
+          const nextCardY =
+            startY + 6 + nextMi * nextSlotH + (nextSlotH - CARD_H_PDF) / 2;
+          const nextMidY = nextCardY + CARD_H_PDF / 2;
+          const joinX = colX + CARD_W_PDF + COL_CONN / 2;
+
+          doc.setDrawColor(35, 60, 100);
+          doc.setLineWidth(0.2);
+          doc.line(colX + CARD_W_PDF, midY, joinX, midY);
+          if (mi % 2 === 0 && mi + 1 < n) {
+            const partnerCardY =
+              startY + 6 + (mi + 1) * slotH + (slotH - CARD_H_PDF) / 2;
+            const partnerMidY = partnerCardY + CARD_H_PDF / 2;
+            doc.line(joinX, midY, joinX, partnerMidY);
+            doc.line(joinX, nextMidY, colX + CARD_W_PDF + COL_CONN, nextMidY);
+          }
+        }
+      });
+    });
+
+    // Champion box
+    const champX = startX + stageList.length * (CARD_W_PDF + COL_CONN);
+    if (champion) {
+      const cy = PH / 2 - 16;
+      const ch = 28;
+      doc.setFillColor(14, 22, 4);
+      doc.rect(champX, cy, CHAMP_W, ch, "F");
+      doc.setDrawColor(200, 155, 0);
+      doc.setLineWidth(0.5);
+      doc.rect(champX, cy, CHAMP_W, ch, "S");
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(6);
+      doc.setTextColor(255, 215, 0);
+      doc.text("CHAMPION", champX + CHAMP_W / 2, cy + 6, { align: "center" });
+
+      // Colored dot for champion country
+      const cc = CC[champion];
+      if (cc) {
+        doc.setFillColor(cc[1], cc[2], cc[3]);
+        doc.rect(champX + CHAMP_W / 2 - 2, cy + 10, 4, 4, "F");
+      }
+
+      doc.setFontSize(9);
+      doc.setTextColor(255, 215, 0);
+      doc.text(champion, champX + CHAMP_W / 2, cy + 20, { align: "center" });
+
+      doc.setFontSize(5);
+      doc.setTextColor(120, 95, 0);
+      doc.text("FIFA World Cup 2026", champX + CHAMP_W / 2, cy + 26, {
+        align: "center",
+      });
+    } else {
+      // Empty champion placeholder
+      doc.setDrawColor(60, 80, 40);
+      doc.setLineWidth(0.3);
+      doc.rect(champX, PH / 2 - 10, CHAMP_W, 20, "S");
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(5.5);
+      doc.setTextColor(40, 55, 30);
+      doc.text("CHAMPION", champX + CHAMP_W / 2, PH / 2 + 2, {
+        align: "center",
+      });
+    }
+
+    // Footer
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(5);
+    doc.setTextColor(35, 55, 90);
+    doc.text(
+      `Generated ${new Date().toLocaleDateString()} · FIFA World Cup 2026 · USA · Canada · Mexico`,
+      PW / 2,
+      PH - 3,
+      { align: "center" },
+    );
+
+    doc.save("FIFA-WC-2026-Bracket.pdf");
+  };
+
+  // ─── RENDER ─────────────────────────────────────────────────────────────────
   const pos32 = computePositions(16, null);
   const pos16 = computePositions(8, pos32);
   const posQF = computePositions(4, pos16);
@@ -931,6 +1233,24 @@ export default function App() {
               }}
             >
               ↩ Undo
+            </button>
+            <button
+              onClick={exportToPDF}
+              title="Export bracket to PDF"
+              style={{
+                padding: "6px 12px",
+                borderRadius: 6,
+                border: "1px solid rgba(255,215,0,0.25)",
+                background: "rgba(255,215,0,0.08)",
+                color: "#FFD700",
+                fontSize: 11,
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+              }}
+            >
+              📄 Export PDF
             </button>
             <button
               onClick={() => setShowReset(true)}
